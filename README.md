@@ -15,7 +15,7 @@ Example of how to run just using python executable<br>
    - poetry install
    - poetry shell
  - Download necessary monarch kg data
-   - python src/pheval_semphen/semphen.py -p directory/to/store/monarch_kg_data
+   - python src/pheval_semphen/download_monarch_data.py -p directory/to/store/monarch_kg_data
  - Run on directory of phenopackets (or single phenopacket) for disease/gene prioritization
    - python src/pheval_semphen/semphen.py -i path/to/phenopacket(s) -o path/to/results/directory -d path/to/monarch_kg_data -m disease
    - python src/pheval_semphen/semphen.py -i path/to/phenopacket(s) -o path/to/results/directory -d path/to/monarch_kg_data -m gene
