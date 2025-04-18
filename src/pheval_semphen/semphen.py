@@ -411,7 +411,7 @@ if __name__ == "__main__":
 																args.mode)
 	
 	# Copy our patient information / output paths for parallel processing (or single core processing)
-	phen_base_data = [[copy.copy(v),copy.copy(outpaths[k])] for k,v in phen_data.items()][0:100]
+	phen_base_data = [[copy.copy(v),copy.copy(outpaths[k])] for k,v in phen_data.items()] ###[0:100] # For testing
 
 	# Load necessary data into memory for semsimian processing
 	semsim = Semsimian(predicates=["rdfs:subClassOf"], 
