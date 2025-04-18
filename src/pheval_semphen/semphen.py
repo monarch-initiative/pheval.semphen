@@ -1,6 +1,8 @@
 # General imports
 import os
 import argparse
+import copy
+import multiprocessing as mp
 from pathlib import Path
 from typing import List, Set
 from collections import Counter
@@ -236,6 +238,36 @@ def parse_input_arguments_to_process_data(input_dir=None, output_dir=None, input
 	return phen_data, outpaths
 
 
+# For divying up data into batches for parallel processing
+def divide_workload(data_list, num_proc: int=1) -> list:
+    """
+    Meant to divide up the elements in data_list into num_proc equal portions
+    by iteratively adding each element to a basket never repeating the same basket until all baskets have an equal amount
+    If num_proc == 1 then the original input list will be returned nested in a top layer list i.e. [data_list]
+    """
+
+    # Deal with our edge case at the very begginning which then is used as input into the second potential edge case
+    ndata_elements = len(data_list)
+    if ndata_elements < num_proc:
+        num_proc = ndata_elements
+
+    # Edge case
+    if num_proc <= 1:
+        return [data_list]
+    else:
+        baskets = [[] for i in range(0, num_proc)]
+        index_count = 0
+        for d in data_list:
+            baskets[index_count].append(d)
+            if index_count == (num_proc-1):
+                index_count = 0
+            else:
+                index_count += 1
+
+        #print("- Workload divided into {} portions with each portion recieving {} elements respectively...".format(num_proc, [format(len(b), ',') for b in baskets]))
+        return baskets
+
+
 #########################
 ### Semsimain wrapper ###
 def get_phenotype_associations(semsim, phenotype_ids, outfile, symbol_map, name_map, mode="disease"):
@@ -301,6 +333,36 @@ def get_phenotype_associations(semsim, phenotype_ids, outfile, symbol_map, name_
 	return results_df
 
 
+# Allows us to bulk process multiple samples without having to instantiate a new semsimian object for each sample
+# This is a sub function of the main function, designed to be called in parallel (or single core)	
+def proccess_samples(phenio_path, mode, mode_symbols, mode_names, patients_to_process):
+
+	# Load necessary data into memory for semsimian processing
+	semsim = Semsimian(predicates=["rdfs:subClassOf"], 
+					spo=None, 
+					resource_path=phenio_path)
+	print("- Semsimian object loaded...")
+
+	tt = 0
+	for p in patients_to_process:
+		outpath = p[1]
+		phenotype_ids = p[0].phenotype_ids
+
+		# Perform search (results are sorted in order of best ranking to worst ranking)
+		results = get_phenotype_associations(semsim, 
+											 phenotype_ids, 
+											 outpath,
+											 mode_symbols,
+											 mode_names, 
+											 mode=mode)
+		
+		tt += 1
+		# Progress statement
+		if tt % 100 == 0:
+			print("- Processed {}/{}".format(format(tt, ','), format(len(patients_to_process), ',')))
+
+	return None
+
 
 
 if __name__ == "__main__":
@@ -329,8 +391,12 @@ if __name__ == "__main__":
 		# Must provide algorithm with path to directory containing phenio.db file, and sssom mapping files
 		parser.add_argument("-d", "--data_dir", help="Directory containing phenio.db, gene and disease mapping sssom files", required=True, type=str)
 		parser.add_argument("-m", "--mode", help="Prioritization mode... disease or gene are allowed", required=True, choices=["disease", "gene"], type=str)
+		
+		# For multiprocessing purposes
+		parser.add_argument("-c", "--num_proc", help="Number of cores to use for parallel processing", required=False, type=int, default=1)
+		
 		return parser.parse_args()
-	#################
+	###########
 	args = mm()
 
 	###############
@@ -343,6 +409,9 @@ if __name__ == "__main__":
 																args.input_terms,
 																args.output_file,
 																args.mode)
+	
+	# Copy our patient information / output paths for parallel processing (or single core processing)
+	phen_base_data = [[copy.copy(v),copy.copy(outpaths[k])] for k,v in phen_data.items()][0:100]
 
 	# Load necessary data into memory for semsimian processing
 	semsim = Semsimian(predicates=["rdfs:subClassOf"], 
@@ -375,39 +444,70 @@ if __name__ == "__main__":
 		entity_symbols = mondo_symbols
 		entity_names = mondo_names
 
-	# Now process all samples
-	tt = 0
-	for k,v in phen_data.items():
+	# For dev / testing purposes...
+	# # Now process all samples
+	# tt = 0
+	# for k,v in phen_data.items():
 		
-		# Perform search (results are sorted in order of best ranking to worst ranking)
-		results = get_phenotype_associations(semsim, 
-											 v.phenotype_ids, 
-											 outpaths[k],
-											 entity_symbols,
-											 entity_names, 
-											 mode=args.mode)
+	# 	# Perform search (results are sorted in order of best ranking to worst ranking)
+	# 	results = get_phenotype_associations(semsim, 
+	# 										 v.phenotype_ids, 
+	# 										 outpaths[k],
+	# 										 entity_symbols,
+	# 										 entity_names, 
+	# 										 mode=args.mode)
 
-		################################################################################
-		### For debugg / testing purposes. Allows us to display relevant information ###
-		# Patient input data
-		# patient_df = {"sample_name":[v.sample_name],
-		# 			 "sample_phenotype_count":[len(v.phenotype_ids)],
-		# 			 "disease_id":[disease_map[v.disease_id]],
-		# 			 "disease_name":[v.disease_name],
-		# 			 "gene_id":[v.gene_id],
-		# 			 "gene_name":[v.gene_symbol]}
+	# 	################################################################################
+	# 	### For debugg / testing purposes. Allows us to display relevant information ###
+	# 	# Patient input data
+	# 	# patient_df = {"sample_name":[v.sample_name],
+	# 	# 			 "sample_phenotype_count":[len(v.phenotype_ids)],
+	# 	# 			 "disease_id":[disease_map[v.disease_id]],
+	# 	# 			 "disease_name":[v.disease_name],
+	# 	# 			 "gene_id":[v.gene_id],
+	# 	# 			 "gene_name":[v.gene_symbol]}
 		
-		# Display data (if we want)
-		#display(pd.DataFrame(patient_df))
-		#display(results[0:20])
-		#tt += 1
-		########
+	# 	# Display data (if we want)
+	# 	#display(pd.DataFrame(patient_df))
+	# 	#display(results[0:20])
+	# 	#tt += 1
+	# 	########
 		
-		# Progress statement
-		if tt % 500 == 0:
-			print("- Processed {}/{}".format(format(tt, ','), format(len(phen_data), ',')))
+	# 	# Progress statement
+	# 	if tt % 500 == 0:
+	# 		print("- Processed {}/{}".format(format(tt, ','), format(len(phen_data), ',')))
 
-		
 	
+	# Now deal with potential parallel processing (if cpu cores > 1)
+	if args.num_proc > 1:
 		
-
+		# Divy up necessary input data for semsimian into parallel processing chunks
+		div_entity_symbols = [copy.copy(entity_symbols) for i in range(0, args.num_proc)]
+		div_entity_names = [copy.copy(entity_names) for i in range(0, args.num_proc)]
+		div_phenio_paths = [os.path.join(args.data_dir, "phenio.db") for i in range(0, args.num_proc)]
+		div_modes = [copy.copy(args.mode) for i in range(0, args.num_proc)]
+		div_phen_data = divide_workload(phen_base_data, num_proc=args.num_proc)
+		print("- Parallel processing with {} cores...".format(args.num_proc))
+		
+		# Setup parallel processing overhead, kick off jobs via asynchronous processing, and retrieve results
+		output = mp.Queue()
+		pool = mp.Pool(processes=args.num_proc)
+		results = [pool.apply_async(proccess_samples, args=(ph, m, msy, mn, pdata)) for ph, m, msy, mn, pdata in zip(div_phenio_paths, 
+																													 div_modes, 
+																													 div_entity_symbols, 
+																													 div_entity_names, 
+																													 div_phen_data)]
+		output = [p.get() for p in results]
+		pool.close()
+		pool.join()
+	
+	# Single core processing (do not need to use multiprocessing overhead)
+	else:
+		print("- Single core processing...")
+		proccess_samples(os.path.join(args.data_dir, "phenio.db"), 
+						 args.mode, 
+						 entity_symbols, 
+						 entity_names, 
+						 phen_base_data)
+	
+	print("- Done processing {} samples".format(format(len(phen_base_data), ',')))
