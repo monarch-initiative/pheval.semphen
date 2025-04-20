@@ -18,14 +18,15 @@ def download_file_url(url: str, outdir: str, extract_gz: bool = False, overwrite
     filename = os.path.join(outdir, url.split("/")[-1])
     fname = filename.split("/")[-1]
 
-    if overwrite == True:
+    if overwrite == False:
         if os.path.isfile(filename):
             print("- Warning, file {} already exists... Set overwrite to True to download and replace")
             return
 
+    r = requests.get(url, stream=True)
     with open(filename, "wb") as f:
-        r = requests.get(url)
-        f.write(r.content)
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
     
     # Extract tar
     if extract_tar != False:
@@ -33,13 +34,17 @@ def download_file_url(url: str, outdir: str, extract_gz: bool = False, overwrite
         file.extractall(kg_dir_path)
         file.close()
 
-    
+
     # Extract gzip
     elif extract_gz != False:
         outpath = os.path.join(outdir, fname.replace(".gz", ""))
-        with gzip.open(filename, 'rb') as f_in:
-            with open(outpath, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
+        buffer_size = 1024 * 1024
+        with gzip.open(filename, 'rb') as f_in, open(outpath, 'wb') as f_out:
+            while True:
+                chunk = f_in.read(buffer_size)
+                if not chunk:
+                    break
+                f_out.write(chunk)
     
     elif extract_zip != False:
         with zipfile.ZipFile(filename, 'r') as zip_ref:
